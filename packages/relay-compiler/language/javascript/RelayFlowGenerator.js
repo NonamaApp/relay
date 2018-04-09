@@ -42,24 +42,14 @@ const {
   SchemaUtils,
 } = require('graphql-compiler');
 
-import type {ScalarTypeMapping} from './RelayFlowTypeTransformers';
+import type {TypeGeneratorOptions} from '../RelayLanguagePluginInterface';
 import type {IRTransform, Fragment, Root} from 'graphql-compiler';
 import type {GraphQLEnumType} from 'graphql';
 
 const {isAbstractType} = SchemaUtils;
 
-type Options = {|
-  +customScalars: ScalarTypeMapping,
-  +useHaste: boolean,
-  +enumsHasteModule: ?string,
-  +existingFragmentNames: Set<string>,
-  +inputFieldWhiteList: $ReadOnlyArray<string>,
-  +relayRuntimeModule: string,
-  +noFutureProofEnums: boolean,
-|};
-
 export type State = {|
-  ...Options,
+  ...TypeGeneratorOptions,
   +generatedFragments: Set<string>,
   +generatedInputObjectTypes: {
     [name: string]: GraphQLInputObjectType | 'pending',
@@ -68,7 +58,10 @@ export type State = {|
   +usedFragments: Set<string>,
 |};
 
-function generate(node: Root | Fragment, options: Options): string {
+function generate(
+  node: Root | Fragment,
+  options: TypeGeneratorOptions,
+): string {
   const ast = IRVisitor.visit(node, createVisitor(options));
   return babelGenerator(ast).code;
 }
@@ -231,7 +224,7 @@ function isPlural(node: Fragment): boolean {
   return Boolean(node.metadata && node.metadata.plural);
 }
 
-function createVisitor(options: Options) {
+function createVisitor(options: TypeGeneratorOptions) {
   const state = {
     customScalars: options.customScalars,
     enumsHasteModule: options.enumsHasteModule,
@@ -243,6 +236,7 @@ function createVisitor(options: Options) {
     usedEnums: {},
     usedFragments: new Set(),
     useHaste: options.useHaste,
+    useSingleArtifactDirectory: options.useSingleArtifactDirectory,
     noFutureProofEnums: options.noFutureProofEnums,
   };
 
@@ -441,6 +435,13 @@ function getFragmentImports(state: State) {
           // TODO(T22653277) support non-haste environments when importing
           // fragments
           imports.push(importTypes([refTypeName], usedFragment + '.graphql'));
+        } else if (
+          state.useSingleArtifactDirectory &&
+          state.existingFragmentNames.has(usedFragment)
+        ) {
+          imports.push(
+            importTypes([refTypeName], './' + usedFragment + '.graphql'),
+          );
         } else {
           imports.push(anyTypeAlias(refTypeName));
         }
@@ -489,5 +490,5 @@ const FLOW_TRANSFORMS: Array<IRTransform> = [
 
 module.exports = {
   generate: Profiler.instrument(generate, 'RelayFlowGenerator.generate'),
-  flowTransforms: FLOW_TRANSFORMS,
+  transforms: FLOW_TRANSFORMS,
 };
